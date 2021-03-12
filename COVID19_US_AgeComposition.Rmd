@@ -10,7 +10,9 @@ knitr::opts_chunk$set(echo=FALSE,
                       message=FALSE, 
                       comment = "", 
                       warning=FALSE, 
-                      results="hide") 
+                      results="hide",
+                      cache=TRUE,
+                      cache.lazy = FALSE) 
 knitr::opts_knit$set(root.dir = "C:/Users/YoonJoung Choi/Dropbox/0 Project/COVID19_US/")
 
 date<-as.Date(Sys.time(	), format='%d%b%Y')
@@ -31,6 +33,8 @@ suppressWarnings(suppressMessages(library(rlist)))
 suppressWarnings(suppressMessages(library(zoo)))
 suppressWarnings(suppressMessages(library(RColorBrewer))) 
 suppressWarnings(suppressMessages(library(lubridate)))
+
+
 ```
 
 ```{r dataPop}
@@ -124,9 +128,13 @@ dtapopagerace10<-dtapopagerace%>%
 ```{r CaseSurveillanceAPI, eval=FALSE}
 # COVID-19 Case Surveillance Public Use (case level)
 # https://data.cdc.gov/Case-Surveillance/COVID-19-Case-Surveillance-Public-Use-Data/vbim-akqf
-    
+
     ##### API 
-    
+
+## CSV
+url<-("https://data.cdc.gov/resource/vbim-akqf.csv")
+
+## JSON
 url<-("https://data.cdc.gov/resource/vbim-akqf.json")
 
 jsondata<-fromJSON(url) 
@@ -161,24 +169,25 @@ dtasurveillance<-read.csv("C:/Users/YoonJoung Choi/Dropbox/0 Project/COVID19_US/
     #table(dtasurveillance$race.and.ethnicity..combined.)
     #table(dta$onset_dt)  
     #table(dta$pos_spec_dt)
-    #table(dta$cdc_report_dt)    
+    #table(dta$cdc_case_earliest_dt)    
     
 # OMG age categories different for the case surveillance and tabulated death count data! 
 # If we want to use same categoreis for cases and deaths, we must use the surveillance data. Ugh...
 # Get pop data readu accordingly 10- year interval
 ```
 
-```{r dtacase}
+```{r dtacase, cache=TRUE}
 # CASE LEVEL data managment         
 dtacase<-dtasurveillance%>%
     mutate_if(is.factor, as.character) %>% 
     mutate(
         
-        cdc_report_dt=as.Date(cdc_report_dt),
-        week=as.numeric(
-            strftime(as.POSIXct(cdc_report_dt), format = "%V")),
-        month=as.numeric(
-            substr(as.character(as.Date(cdc_report_dt, format = "%m")), 6, 7)), 
+        yearmonth =substr(cdc_case_earliest_dt, 1, 7),    
+        year =substr(cdc_case_earliest_dt, 1, 4),    
+        month =substr(cdc_case_earliest_dt, 6, 7),    
+        cdc_case_earliest_dt=as.POSIXct(as.Date(cdc_case_earliest_dt)),
+        week=as.numeric(strftime(cdc_case_earliest_dt, format = "%V")),
+        week=ifelse(year=="2021" & week<50, week+53, week),
         
         sextotal="Total",
         
@@ -187,22 +196,22 @@ dtacase<-dtasurveillance%>%
         age=as.numeric(sapply(strsplit(agegroup,"-"), `[`, 1)), #age interval begins
             age=ifelse(agegroup=="80+ Years", 80, age),
         
-        racegroup=race.and.ethnicity..combined., 
-        racegroup=ifelse(race.and.ethnicity..combined.=="White, Non-Hispanic",
+        racegroup=race_ethnicity_combined, 
+        racegroup=ifelse(race_ethnicity_combined=="White, Non-Hispanic",
                          "NH White", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Black, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Black, Non-Hispanic",
                          "NH Black", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Asian, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Asian, Non-Hispanic",
                          "NH Asian", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="American Indian/Alaska Native, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="American Indian/Alaska Native, Non-Hispanic",
                          "NH AIAN", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Native Hawaiian/Other Pacific Islander, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Native Hawaiian/Other Pacific Islander, Non-Hispanic",
                          "NH NHPI", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Multiple/Other, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Multiple/Other, Non-Hispanic",
                          "NH Multiple/Other", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Hispanic/Latino",
+        racegroup=ifelse(race_ethnicity_combined=="Hispanic/Latino",
                          "Hispanic", racegroup),
-        racegroup=ifelse(is.na(race.and.ethnicity..combined.)==TRUE,
+        racegroup=ifelse(is.na(race_ethnicity_combined)==TRUE,
                          "Unknown", racegroup),
         
         raceagegroup=paste0(racegroup, "_",agegroup), 
@@ -234,15 +243,17 @@ str(dtacase)
 ```{r dtamonthly}
 # Weekly trend count data by RACE AND AGE
 dtamonthly<-dtacase%>%
-    arrange(racegroup, agegroup, month)%>%
-    mutate(raceagegroupmonth=paste0(racegroup,"_",agegroup,"_",as.character(month)))%>%
+    arrange(racegroup, agegroup, yearmonth)%>%
+    mutate(raceagegroupmonth=paste0(racegroup,"_",agegroup,"_",yearmonth))%>%
     group_by(raceagegroupmonth)%>%
     summarise_at(vars(case, death, hosp, missingdeath, missinghosp), funs(sum), na.rm = TRUE)%>%
     ungroup()%>%
     mutate(
         racegroup=sapply(strsplit(raceagegroupmonth,"_"), `[`, 1),
         agegroup=sapply(strsplit(raceagegroupmonth,"_"), `[`, 2),
-        month=as.numeric(sapply(strsplit(raceagegroupmonth,"_"), `[`, 3)), 
+        yearmonth=sapply(strsplit(raceagegroupmonth,"_"), `[`, 3), 
+        year=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 1)), 
+        month=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 2)), 
         
         age=as.numeric(sapply(strsplit(agegroup,"-"), `[`, 1)), #age interval begins
             age=ifelse(agegroup=="80+ Years", 80, age), 
@@ -261,7 +272,7 @@ dim(dtamonthly)
 dtamonthly<-left_join(dtamonthly, dtapopagerace10, by = c("racegroup", "age")) 
 dim(dtamonthly)    
 
-write.csv(dtamonthly, "X_COVID19_US_AgeComposition/dtamonthly_20201204.csv")
+write.csv(dtamonthly, "X_COVID19_US_AgeComposition/dtamonthly_202010224.csv")
 ```
 
 ```{r dtamonthlybyrace}
@@ -343,7 +354,7 @@ dim(dtaweekly)
 dtaweekly<-left_join(dtaweekly, dtapopagerace10, by = c("racegroup", "age")) 
 dim(dtaweekly)    
 
-write.csv(dtaweekly, "X_COVID19_US_AgeComposition/dtaweekly_20201204.csv")
+write.csv(dtaweekly, "X_COVID19_US_AgeComposition/dtaweekly_2021.csv")
 ```
 
 ```{r dtaweeklycum}
@@ -373,7 +384,7 @@ colnames(dtaweeklycum)
 totalcases<-as.character(sum(dtacase$case))
 totaldeaths<-as.character(table(dtacase$death)[[2]])
 latestweek<-max(dtacase$week)
-latestdate<-as.character(as.Date.POSIXct(max(dtacase$cdc_report_dt)))
+latestdate<-as.character(as.Date.POSIXct(max(dtacase$cdc_case_earliest_dt)))
 
 missingage  <-round(100*(prop.table(table(dtacase$missingage))[[2]]), 1)
 missingsex <-round(100*(prop.table(table(dtacase$missingsex))[[2]]), 1)
@@ -391,8 +402,8 @@ missingracedeath <-round(100*(prop.table(table(temp$missingrace))[[2]]), 1)
 (Updated: `r time` EDT)  
 
 * Data source: [COVID-19 Case Surveillance Public Use Data](https://data.cdc.gov/Case-Surveillance/COVID-19-Case-Surveillance-Public-Use-Data/vbim-akqf)     
-* Accessed on December 25, 2020 (version released on December 4, 2020)   
-* Latest report week is `r latestweek`, and latest report date is November 19, 2020.    
+* Accessed on February 26, 2021 (version released on February 24, 2021)   
+* Latest report date is February 5, 2021.    
 * Total number of cases included in the data source: `r totalcases`    
 * Total number of deaths included in the data source: `r totaldeaths`    
 * NOTE: 
@@ -455,7 +466,7 @@ str(dtafig)
 ```
 
 ####__1.1. Population, cumulative cases, and cumulative deaths__
-```{r overall_plotagecomposition, results="asis", results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition, results="asis", results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>%
     plot_ly(x=~group,
             y = ~pct, type = "bar",
@@ -510,7 +521,7 @@ sum(dtafig$case)
 ```
 
 #####__1.2.1. Weekly reported cases, number__
-```{r overall_plotagecomposition_trend1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_trend1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     plot_ly(x=~weekdate,
@@ -532,7 +543,7 @@ dtafig%>%
 
 #####__1.2.2. Weekly reported cases, percent__
 (only weeks with more than 20 cases)
-```{r overall_plotagecomposition_trend2, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_trend2, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -590,7 +601,7 @@ sum(dtafig$hosp)
 ```
 
 #####__1.3.1. Weekly reported hospitalizations, number__
-```{r overall_plotagecomposition_hosp_trend1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_hosp_trend1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -612,7 +623,7 @@ dtafig%>%
 
 #####__1.3.2. Weekly reported hospitalizations, percent__
 (only weeks with more than 20 hospitalizations)
-```{r overall_plotagecomposition_hosp_trend2, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_hosp_trend2, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -669,7 +680,7 @@ sum(dtafig$death)
 ```
 
 #####__1.4.1. Weekly reported deaths, number__
-```{r overall_plotagecomposition_death_trend1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_death_trend1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -691,7 +702,7 @@ dtafig%>%
 
 #####__1.4.2. Weekly reported deaths, percent__
 (only weeks with more than 20 deaths)
-```{r overall_plotagecomposition_death_trend2, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotagecomposition_death_trend2, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -756,7 +767,7 @@ str(dtafig)
 ```
 
 ####__2.1. Population, cumulative cases, and cumulative deaths__
-```{r overall_plotracecomposition, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 # color ccheme: single hue 9-scale gree & blue
 ### https://colorbrewer2.org/?type=sequential&scheme=YlOrRd&n=9
 
@@ -835,7 +846,7 @@ sum(dtafig$case)
 ```
 
 #####__2.2.1. Weekly reported cases, number__
-```{r overall_plotracecomposition_trend1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_trend1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -864,7 +875,7 @@ dtafig%>%
 
 #####__2.2.2. Weekly reported cases, percent__
 (only weeks with more than 20 cases)
-```{r overall_plotracecomposition_trend2, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_trend2, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig1<-dtafig%>%
     filter(total>20)%>%
@@ -933,7 +944,7 @@ sum(dtafig$death)
 ```
 
 #####__2.3.1. Weekly reported deaths, number__
-```{r overall_plotracecomposition_death_trend1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_death_trend1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -961,7 +972,7 @@ dtafig%>%
 
 #####__2.3.2. Weekly reported deaths, percent__
 (only weeks with more than 20 deaths)
-```{r overall_plotracecomposition_death_trend2, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_death_trend2, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -1034,7 +1045,7 @@ str(dtafig)
 ```
 
 ####__2.A.1. Population, cumulative cases, and cumulative deaths__
-```{r overall_plotracecomposition_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>%
     plot_ly(x=~group,
             y = ~pct, type = "bar",
@@ -1098,7 +1109,7 @@ sum(dtafig$case)
 ```
 
 #####__2.A.2.1. Weekly reported cases, number__
-```{r overall_plotracecomposition_case_trend1_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_case_trend1_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -1125,7 +1136,7 @@ dtafig%>%
 
 #####__2.A.2.2. Weekly reported cases, percent__
 (only weeks with more than 20 cases)
-```{r overall_plotracecomposition_case_trend2_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_case_trend2_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -1191,7 +1202,7 @@ sum(dtafig$hosp)
 ```
 
 #####__2.A.3.1. Weekly reported hospitlizations, number__
-```{r overall_plotracecomposition_hosp_trend1_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_hosp_trend1_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -1218,7 +1229,7 @@ dtafig%>%
 
 #####__2.A.3.2. Weekly reported hospitlizations, percent__
 (only weeks with more than 20 hospitalizations)
-```{r overall_plotracecomposition_hosp_trend2_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_hosp_trend2_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -1284,7 +1295,7 @@ sum(dtafig$death)
 ```
 
 #####__2.A.4.1. Weekly reported deaths, number__
-```{r overall_plotracecomposition_death_trend1_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_death_trend1_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 
 dtafig%>%
@@ -1311,7 +1322,7 @@ dtafig%>%
 
 #####__2.A.4.2. Weekly reported deaths, percent__
 (only weeks with more than 20 deaths)
-```{r overall_plotracecomposition_death_trend2_knownrace, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r overall_plotracecomposition_death_trend2_knownrace, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 dtafig%>%
     filter(total>20)%>%
@@ -1440,7 +1451,7 @@ str(dtafig)
 ####__3.1. By metric: population, cases, hopitalization, and deaths__
 
 #####__3.1.1. Age distribution of population by race__ 
-```{r plotagecomposition1-1, results="asis", results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r plotagecomposition1-1, results="asis", results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>% 
     filter(group=="1. Population")%>%
     plot_ly(x=~racegroup,
@@ -1460,7 +1471,7 @@ dtafig%>%
 ```
 
 #####__3.1.2. Age distribution of cases by race__
-```{r plotagecomposition1-2, , results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r plotagecomposition1-2, , results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>% 
     filter(group=="2. Cases")%>%
     plot_ly(x=~racegroup,
@@ -1480,7 +1491,7 @@ dtafig%>%
 ```
 
 #####__3.1.3. Age distribution of hospitalizations by race__
-```{r plotagecomposition1-3, , results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r plotagecomposition1-3, , results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>% 
     filter(group=="3. Hospitalizations (Reported)")%>%
     plot_ly(x=~racegroup,
@@ -1500,7 +1511,7 @@ dtafig%>%
 ```
 
 #####__3.1.4. Age distribution of deaths by race__
-```{r plotagecomposition1-4, , results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r plotagecomposition1-4, , results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 dtafig%>% 
     filter(group=="4. Deaths (Reported)")%>%
     plot_ly(x=~racegroup,
@@ -1521,7 +1532,7 @@ dtafig%>%
 
 ####__3.2. By race__
 __Same data but different organizatoin__
-```{r plotagecomposition2, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition2, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 panel <- . %>% 
     plot_ly(x=~group,
             y = ~pct, type = "bar",
@@ -1712,7 +1723,7 @@ panel <- . %>%
 
 #####__4.1.1. Trends of cumulative percent in cases__
 (only weeks with more than 20 cases)
-```{r plotagecomposition_trend_case_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_case_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Cases")%>%
     filter(total>20)%>%
@@ -1728,7 +1739,7 @@ dtafig%>%
 
 #####__4.1.2. Trends of cumulative percent in hospitalizations__
 (only weeks with more than 20 hospitalizations)
-```{r plotagecomposition_trend_hosp_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_hosp_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="hospitalizations")%>%
     filter(total>20)%>%
@@ -1743,7 +1754,7 @@ dtafig%>%
 
 #####__4.1.3. Trends of cumulative percent in deaths__
 (only weeks with more than 20 deaths)
-```{r plotagecomposition_trend_death_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_death_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Deaths")%>%
     filter(total>20)%>%
@@ -1783,7 +1794,7 @@ panel <- . %>%
 ```
 
 #####__4.2.1. Trends of cumulative count in cases__
-```{r plotagecomposition_trend_case_num, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_case_num, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Cases")%>%
     group_by(racegroup) %>%
@@ -1796,7 +1807,7 @@ dtafig%>%
 ```
 
 #####__4.2.2. Trends of cumulative count in hospitalizations__
-```{r plotagecomposition_trend_hosp_num, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_hosp_num, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="hospitalizations")%>%
     group_by(racegroup) %>%
@@ -1809,7 +1820,7 @@ dtafig%>%
 ```
 
 #####__4.2.3. Trends of cumulative count in deaths__
-```{r plotagecomposition_trend_death_num, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_trend_death_num, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Deaths")%>%
     group_by(racegroup) %>%
@@ -1971,7 +1982,7 @@ panel <- . %>%
 
 #####__4.3.1. Trends of weekly percent in cases__
 (only weeks with more than 20 cases)
-```{r plotagecomposition_weeklytrend_case_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_case_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Cases")%>%
     filter(total>20)%>%
@@ -2005,7 +2016,7 @@ fig2case<-dtafig2case%>%
 
 #####__4.3.2. Trends of weekly percent in hospitalizations__
 (only weeks with more than 20 hospitalizations)
-```{r plotagecomposition_weeklytrend_hosp_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_hosp_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="hospitalizations")%>%
     filter(total>20)%>%
@@ -2038,7 +2049,7 @@ fig2hosp<-dtafig2hosp%>%
 
 #####__4.3.3. Trends of weekly percent in deaths__
 (only weeks with more than 20 deaths)
-```{r plotagecomposition_weeklytrend_death_pct, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_death_pct, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Deaths")%>%
     filter(total>20)%>%
@@ -2069,7 +2080,7 @@ fig2death<-dtafig2death%>%
 ```
 
 (only weeks with more than 30 deaths)
-```{r plotagecomposition_weeklytrend_death_pct2, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_death_pct2, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Deaths")%>%
     filter(total>30)%>%
@@ -2109,7 +2120,7 @@ panel <- . %>%
 ```
 
 #####__4.4.1. Trends of weekly number in cases__
-```{r plotagecomposition_weeklytrend_case_count, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_case_count, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Cases")%>%
     group_by(racegroup) %>%
@@ -2122,7 +2133,7 @@ dtafig%>%
 ```
 
 #####__4.4.2. Trends of weekly number in hospitalizations__
-```{r plotagecomposition_weeklytrend_hosp_count, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_hosp_count, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="hospitalizations")%>%
     group_by(racegroup) %>%
@@ -2135,7 +2146,7 @@ dtafig%>%
 ```
 
 #####__4.4.3. Trends of weekly number in deaths__
-```{r plotagecomposition_weeklytrend_death_count, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotagecomposition_weeklytrend_death_count, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 dtafig%>%
     filter(group=="Deaths")%>%
     group_by(racegroup) %>%
@@ -2191,7 +2202,7 @@ dtasortedbyage<-dtaweekly %>%
 ```
 
 __2-week lag: deaths in week X / cases in weeks X-1 &  X-2 (%)__ 
-```{r plotcfr, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotcfr, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 
 dtasortedbyage %>% 
     select(racegroup, weekdate, age, cfr)%>%
@@ -2302,7 +2313,7 @@ dtasortedbyrace<-dtaweekly %>%
     arrange(agegroup, weekdate, racegroup)
 ```
 
-```{r plotcfr_byrace, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r plotcfr_byrace, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 
 dtasortedbyrace %>% 
     select(racegroup, weekdate, agegroup, cfr)%>%
@@ -2323,7 +2334,7 @@ dtasortedbyrace %>%
 
 ## Figure 1. Trend of race-distribution in weekly COVID-19 cases
 
-```{r fig1, results="asis", fig.align="left", out.width="800px", out.height="300px"}
+```{r fig1, results="asis", fig.align="left", out.width="1000px", out.height="300px"}
 
 fig1
 
@@ -2332,7 +2343,7 @@ fig1
 ```
 
 ## Figure 2. Trend of age-distribution in weekly COVID-19 cases, hospitalizations, and deaths by race/ethnicity: Hispanic, non-Hispanic black, vs. Non-Hispanic white 
-```{r fig2, results="asis", fig.align="left", out.width="800px", out.height="800px"}
+```{r fig2, results="asis", fig.align="left", out.width="1000px", out.height="800px"}
 subplot(
         fig2case %>% 
             layout(yaxis=list(title = "% of weekly cases", 
@@ -2365,7 +2376,7 @@ __Decision points/questions__:
 3. which option? 
 
 ##__Figure 3. Trends of weekly case fatality ratio (option 1)__ 
-```{r fig3option1, results="asis", fig.align="left", out.width="800px", out.height="350px"}
+```{r fig3option1, results="asis", fig.align="left", out.width="1000px", out.height="350px"}
 
 dtasortedbyage %>% 
     select(racegroup, weekdate, age, cfr)%>%
@@ -2388,7 +2399,7 @@ dtasortedbyage %>%
 
 log scale vs. linear scale
 
-```{r fig3option2, results="asis", fig.align="left", out.width="800px", out.height="400px"}
+```{r fig3option2, results="asis", fig.align="left", out.width="1000px", out.height="400px"}
 
 dtasortedbyrace %>% 
     select(racegroup, weekdate, agegroup, cfr)%>%
@@ -2410,7 +2421,7 @@ dtasortedbyrace %>%
         )  
 ```
 
-```{r fig3option2_linear, results="asis", fig.align="left", out.width="800px", out.height="400px"}
+```{r fig3option2_linear, results="asis", fig.align="left", out.width="1000px", out.height="400px"}
 
 dtasortedbyrace %>% 
     select(racegroup, weekdate, agegroup, cfr)%>%
@@ -2435,7 +2446,7 @@ dtasortedbyrace %>%
 
 log scale vs. linear scale
 
-```{r fig3option3, results="asis", fig.align="left", out.width="800px", out.height="400px"}
+```{r fig3option3, results="asis", fig.align="left", out.width="1000px", out.height="400px"}
 
 dtasortedbyrace %>% 
     select(racegroup, weekdate, agegroup, cfr)%>%
@@ -2456,7 +2467,7 @@ dtasortedbyrace %>%
         )  
 ```
 
-```{r fig3option3_linear, results="asis", fig.align="left", out.width="800px", out.height="400px"}
+```{r fig3option3_linear, results="asis", fig.align="left", out.width="1000px", out.height="400px"}
 
 dtasortedbyrace %>% 
     select(racegroup, weekdate, agegroup, cfr)%>%
